@@ -8,26 +8,25 @@ output:
       code_folding: hide
       toc_depth: 3
 editor_options: 
-  chunk_output_type: inline
+  chunk_output_type: console
 ---
 
-```{r setup, include=FALSE}
+```{r setup, include = FALSE, cache = T}
 knitr::opts_chunk$set(echo = TRUE, cache = TRUE, tidy = TRUE)
 # options(digits = 2)
 ```
 
 ## Libraries
 
-```{r libs message = F}
+```{r libs, message = F}
 
 ## NOTE: loading warnings suppressed
 ## SET YOUR WD FIRST
 
 library(pacman)
-pacman::p_load(lme4, tidyverse)
+pacman::p_load(lme4, tidyverse,car)
 
 library(here)
-
 here()
 ```
 
@@ -44,7 +43,7 @@ data <- subset(data, !is.na(CODESTART) & !is.na(CODEEND))
 
 ### Process data
 
-```{r processing}
+```{r processing, eval = F}
 
 for (i in 1:nrow(data)) {
   
@@ -75,10 +74,10 @@ for (i in 1:nrow(data)) {
 }
 ```
 
-```{r write_data}
-write.table(data, row.names = F,
-            file = here::here("data", "postprocess", "BT_data_weather.csv"),
-            sep = ";")
+```{r}
+# write.table(data, row.names = F,
+#             file = here::here("data", "postprocess", "BT_data_weather.csv"),
+#             sep = ";")
 ```
 
 
@@ -95,7 +94,9 @@ data <- subset(data, !is.na(CODESTART) & !is.na(CODEEND))
 
 ### Process data for window t-14
 
-```{r processing_14days}
+Below code shows example processing of $t_{-14}$ time window, similar procedure can be used to obrain the $t_{-30}$ window. Do not run this if not needed (post-processed data is alrady in the foldser).
+
+```{r processing_14days, eval = F}
 
 for (i in 1:nrow(data)) {
   
@@ -140,8 +141,206 @@ for (i in 1:nrow(data)) {
 }
 ```
 
-```{r write_data}
-write.table(data, row.names = F,
-            file = here::here("data", "postprocess", "BT_data_weather.csv"),
-            sep = ";")
+```{r}
+# write.table(data, row.names = F,
+#             file = here::here("data", "postprocess", "BT_data_weather.csv"),
+#             sep = ";")
 ```
+
+## Modelling
+
+Load post-processed data:
+
+```{r}
+dataset <- read_delim(here("data","postprocess","BT_data_weather_nests.csv"), ";",
+                      escape_double = FALSE, trim_ws = TRUE)
+# summary(dataset)
+# glimpse(dataset)
+```
+
+Fit two main models with relevant variables:
+
+```{r}
+# model z 14-dniowym oknem przed LD
+model1 <- glmer(EPC ~ scale(TEMP_BROOD14_mean)+scale(PRCP_BROOD14_sum)+
+                  #I(TEMP_BROOD14_max - TEMP_BROOD14_min)+ #to byla amplituda temp ale usunalem ja
+                  scale(TEMP_BROOD14_var) +
+                  scale(PRCP_BROOD14_var) +
+                  (1|FRING),
+                family = 'binomial',
+                data = dataset)
+
+summary(model1)
+
+
+# model z 30-dniowym oknem
+model2 <- glmer(EPC ~ scale(TEMP_BROOD30_mean)+scale(PRCP_BROOD30_sum)+
+                  #I(TEMP_BROOD14_max - TEMP_BROOD14_min)+ #to byla amplituda temp ale usunalem ja
+                  scale(TEMP_BROOD30_var) +
+                  scale(PRCP_BROOD30_var) +
+                  (1|FRING),
+                family = 'binomial',
+                data = dataset)
+
+summary(model2)
+```
+
+Plot predicted curves:
+
+```{r}
+plot(EPC ~ scale(TEMP_BROOD14_var), data = dataset)
+curve(exp(-0.76+0.35*x)/(exp(-0.76+0.35*x)+1), col = 'red', lwd = 2, add = T)
+
+plot(EPC ~ scale(TEMP_BROOD30_var), data = dataset)
+curve(exp(-0.77+0.41*x)/(exp(-0.77+0.41*x)+1), col = 'red', lwd = 2, add = T)
+```
+
+## Explore variable correlations
+
+Variance inflation factors:
+
+```{r}
+vif(model1)
+vif(model2)
+```
+
+In all cases VIF<5, whcih means there are no collinearity problems.
+
+Let's have a look at correlations across weather variables:
+
+```{r}
+pairs(dataset[,c(25,26,29,32)])
+pairs(dataset[,c(33,34,37,40)])
+
+cor(dataset[,c(25,26,29,32)])
+cor(dataset[,c(33,34,37,40)])
+```
+
+The only worrying correlation exists between precipitation sum and variance (which is expected, sum of precipitation is similar to a Poisson variable).
+
+Let's see if PCA could generate some meaningful scores:
+
+```{r}
+mypca_14 <- prcomp(dataset[,c(25,26,29,32)], center = T, scale. = T)
+biplot(mypca_14)
+biplot(mypca_14, choices = c(2,3))
+```
+
+Correlations between mean and variance clearly distinguish the thermal and precipitation dimentions, let's see what happens if we use PCs in the model:
+
+```{r}
+model3 <- glmer(EPC ~ mypca_14$x[,1] + mypca_14$x[,2] +
+                  mypca_14$x[,3] + mypca_14$x[,4] +
+                  (1|FRING),
+                family = 'binomial',
+                data = dataset)
+
+summary(model3)
+```
+
+Results are the same: EPC is predicted by PC3 which is negatively loaded by temperature variability:
+
+```{r}
+mypca_14$rotation
+```
+
+
+```{r}
+mypca_30 <- prcomp(dataset[,c(33,34,37,40)], center = T, scale. = T)
+biplot(mypca_30)
+biplot(mypca_30, choices = c(2,3))
+```
+
+```{r}
+model4 <- glmer(EPC ~ mypca_30$x[,1] + mypca_30$x[,2] +
+                  mypca_30$x[,3] + mypca_30$x[,4] +
+                  (1|FRING),
+                family = 'binomial',
+                data = dataset)
+
+summary(model4)
+```
+
+Conclusions are similar, this time PC3 is positively loaded by temperature variance and this is reflected in the GLMM output:
+
+```{r}
+mypca_30$rotation
+```
+
+## Interactions and simpler models
+
+```{r}
+# model z 14-dniowym oknem przed LD
+model1.1 <- glmer(EPC ~ scale(TEMP_BROOD14_mean)+
+                  scale(TEMP_BROOD14_var) +
+                  (1|FRING),
+                family = 'binomial',
+                data = dataset)
+
+summary(model1.1)
+
+
+model1.2 <- glmer(EPC ~ scale(TEMP_BROOD14_var) +
+                  (1|FRING),
+                family = 'binomial',
+                data = dataset)
+
+summary(model1.2)
+
+model1.3 <- glmer(EPC ~ scale(TEMP_BROOD14_mean)*scale(PRCP_BROOD14_sum)+
+                  scale(TEMP_BROOD14_var)*scale(PRCP_BROOD14_var) +
+                    scale(TEMP_BROOD14_mean)*scale(TEMP_BROOD14_var) +
+                    scale(PRCP_BROOD14_var)*scale(PRCP_BROOD14_sum) +
+                  (1|FRING),
+                family = 'binomial',
+                data = dataset)
+
+summary(model1.3)
+
+model1.3 <- glmer(EPC ~ scale(TEMP_BROOD14_mean) + scale(PRCP_BROOD14_sum)+
+                  scale(TEMP_BROOD14_var)*scale(PRCP_BROOD14_var) +
+                  (1|FRING),
+                family = 'binomial',
+                data = dataset)
+
+summary(model1.3)
+```
+
+```{r}
+# model z 14-dniowym oknem przed LD
+model2.1 <- glmer(EPC ~ scale(TEMP_BROOD30_mean)+
+                  scale(TEMP_BROOD30_var) +
+                  (1|FRING),
+                family = 'binomial',
+                data = dataset)
+
+summary(model2.1)
+
+
+model2.2 <- glmer(EPC ~ scale(TEMP_BROOD30_var) +
+                  (1|FRING),
+                family = 'binomial',
+                data = dataset)
+
+summary(model2.2)
+
+model2.3 <- glmer(EPC ~ scale(TEMP_BROOD30_mean)*scale(PRCP_BROOD30_sum)+
+                  scale(TEMP_BROOD30_var)*scale(PRCP_BROOD30_var) +
+                    scale(TEMP_BROOD30_mean)*scale(TEMP_BROOD30_var) +
+                    scale(PRCP_BROOD30_var)*scale(PRCP_BROOD30_sum) +
+                  (1|FRING),
+                family = 'binomial',
+                data = dataset)
+
+summary(model2.3)
+
+model2.3 <- glmer(EPC ~ scale(TEMP_BROOD30_mean) + scale(PRCP_BROOD30_sum)+
+                  scale(TEMP_BROOD30_var)*scale(PRCP_BROOD30_var) +
+                  (1|FRING),
+                family = 'binomial',
+                data = dataset)
+
+summary(model2.3)
+```
+
+General conclusion: results are stable and there is no sign for any stron interaction.
