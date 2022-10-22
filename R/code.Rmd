@@ -1,0 +1,147 @@
+---
+title: "BT weather data"
+author: "Szymon Drobniak"
+date: "`r Sys.Date()`"
+output:
+  rmdformats::robobook:
+      
+      code_folding: hide
+      toc_depth: 3
+editor_options: 
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, cache = TRUE, tidy = TRUE)
+# options(digits = 2)
+```
+
+## Libraries
+
+```{r libs message = F}
+
+## NOTE: loading warnings suppressed
+## SET YOUR WD FIRST
+
+library(pacman)
+pacman::p_load(lme4, tidyverse)
+
+library(here)
+
+here()
+```
+
+## Processing of chick data
+
+### Load data
+
+```{r data_load}
+data <- read.delim(here('data', 'EPC_WEATHER_2022.csv'), sep = ';', head = T)
+temp <- read.table(here('data', '210805_temp.csv'), sep = ';', head = T)
+rain <- read.table(here('data', '210805_rain.csv'), sep = ';', head = T)
+data <- subset(data, !is.na(CODESTART) & !is.na(CODEEND))
+```
+
+### Process data
+
+```{r processing}
+
+for (i in 1:nrow(data)) {
+  
+  # define the start timestamp
+  codestart <- data[i, 'CODESTART']
+  codeend <- data[i, 'CODEEND']
+  
+  cat(codestart, codeend, '\n')
+  # if (codestart_prev == codestart)
+  # cat(codestart, codeend, "\n")
+  
+  t_index1 <- which(temp[, "CODE"] == codestart)
+  r_index1 <- which(rain[, "CODE"] == codestart)
+  
+  t_index2 <- which(temp[, "CODE"] == codeend)
+  r_index2 <- which(rain[, "CODE"] == codeend)
+  
+  t_data <- temp[c(t_index1:t_index2),]
+  r_data <- rain[c(r_index1:r_index2),]
+  
+  mean_temp <- mean(t_data[, "temp"], na.rm = T)
+  sum_prcp <- sum(r_data[, "rain"], na.rm = T)
+  
+  data[i, "TEMP_BROOD"] <- mean_temp
+  data[i, "PRCP_BROOD"] <- sum_prcp
+  
+  cat("Row "); cat(i); cat(" done\n")
+}
+```
+
+```{r write_data}
+write.table(data, row.names = F,
+            file = here::here("data", "postprocess", "BT_data_weather.csv"),
+            sep = ";")
+```
+
+
+## Processing of nest data
+
+### Load data
+
+```{r data_load_nests}
+data <- read.delim(here('data', 'EPP WEATHER_nests.csv'), sep = ';', head = T)
+temp <- read.table(here('data', '210805_temp.csv'), sep = ';', head = T)
+rain <- read.table(here('data', '210805_rain.csv'), sep = ';', head = T)
+data <- subset(data, !is.na(CODESTART) & !is.na(CODEEND))
+```
+
+### Process data for window t-14
+
+```{r processing_14days}
+
+for (i in 1:nrow(data)) {
+  
+  # define the start timestamp
+  codestart <- data[i, 'CODESTART']
+  codeend <- data[i, 'CODEEND']
+  
+  cat(codestart, codeend, '\n')
+  # if (codestart_prev == codestart)
+  # cat(codestart, codeend, "\n")
+  
+  t_index1 <- which(temp[, "CODE"] == codestart)
+  r_index1 <- which(rain[, "CODE"] == codestart)
+  
+  t_index2 <- which(temp[, "CODE"] == codeend)
+  r_index2 <- which(rain[, "CODE"] == codeend)
+  
+  t_data <- temp[c(t_index1:t_index2),]
+  r_data <- rain[c(r_index1:r_index2),]
+  
+  mean_temp <- mean(t_data[, "temp"], na.rm = T)
+  sum_prcp <- sum(r_data[, "rain"], na.rm = T)
+  min_temp <- min(t_data[, "temp"], na.rm = T)
+  max_temp <- max(t_data[, "temp"], na.rm = T)
+  cv_temp <- sd(t_data[, "temp"]+273, na.rm = T)/mean(t_data[, "temp"]+273, na.rm = T)
+  
+  min_prcp <- min(r_data[, "rain"], na.rm = T)
+  max_prcp <- max(r_data[, "rain"], na.rm = T)
+  cv_prcp <- sd(r_data[, "rain"], na.rm = T)/mean(r_data[, "rain"], na.rm = T)
+  
+  
+  data[i, "TEMP_BROOD14_mean"] <- mean_temp
+  data[i, "PRCP_BROOD14_sum"] <- sum_prcp
+  data[i, "TEMP_BROOD14_min"] <- min_temp
+  data[i, "TEMP_BROOD14_max"] <- max_temp
+  data[i, "TEMP_BROOD14_cv"] <- cv_temp
+  data[i, "PRCP_BROOD14_min"] <- min_temp
+  data[i, "PRCP_BROOD14_max"] <- max_temp
+  data[i, "PRCP_BROOD14_cv"] <- cv_temp
+  
+  cat("Row "); cat(i); cat(" done\n")
+}
+```
+
+```{r write_data}
+write.table(data, row.names = F,
+            file = here::here("data", "postprocess", "BT_data_weather.csv"),
+            sep = ";")
+```
